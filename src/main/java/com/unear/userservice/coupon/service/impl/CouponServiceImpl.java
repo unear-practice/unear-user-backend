@@ -162,16 +162,16 @@ public class CouponServiceImpl implements CouponService {
 
         Map<String, Object> metadata = new LinkedHashMap<>(baseMetadata);
 
-        if (template.getDiscountCode() != null) {
-            metadata.put("benefit", template.getDiscountCode());
-        }
-        if (template.getMembershipCode() != null) {
-            metadata.put("grade", template.getMembershipCode());
-        }
-
-        if (metadata.size() > baseMetadata.size()) {
-            userActionLogProducer.logUserAction(userId, UserActionType.DOWNLOAD_FCFS_COUPON, "eventPage", metadata);
-        }
+//        if (template.getDiscountCode() != null) {
+//            metadata.put("benefit", template.getDiscountCode());
+//        }
+//        if (template.getMembershipCode() != null) {
+//            metadata.put("grade", template.getMembershipCode());
+//        }
+//
+//        if (metadata.size() > baseMetadata.size()) {
+//            userActionLogProducer.logUserAction(userId, UserActionType.DOWNLOAD_FCFS_COUPON, "eventPage", metadata);
+//        }
 
         try {
 //            userCouponRepository.save(userCoupon);
