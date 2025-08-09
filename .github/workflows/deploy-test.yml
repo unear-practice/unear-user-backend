@@ -1,0 +1,84 @@
+name: Deploy develop to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: 1seyoung/unear-app:develop
+
+  deploy:
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [dev1, dev2]  # 병렬 2개
+        max-parallel: 2
+    steps:
+      - name: Deploy to EC2 via SSH (parallel)
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ matrix.target == 'dev1' && secrets.DEV_EC2_HOST_1 || secrets.DEV_EC2_HOST_2 }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ~/unear-app
+
+            # 환경변수 파일 생성 (덮어쓰기)
+            cat > .env << 'EOF'
+            SPRING_PROFILES_ACTIVE=prod
+            DB_URL=${{ secrets.DB_URL }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            MAIL_HOST=${{ secrets.MAIL_HOST }}
+            MAIL_PORT=${{ secrets.MAIL_PORT }}
+            MAIL_USERNAME=${{ secrets.MAIL_USERNAME }}
+            MAIL_PASSWORD=${{ secrets.MAIL_PASSWORD }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            GOOGLE_REDIRECT_URI=${{ secrets.GOOGLE_REDIRECT_URI }}
+            KAKAO_CLIENT_ID=${{ secrets.KAKAO_CLIENT_ID }}
+            KAKAO_CLIENT_SECRET=${{ secrets.KAKAO_CLIENT_SECRET }}
+            KAKAO_REDIRECT_URI=${{ secrets.KAKAO_REDIRECT_URI }}
+            NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}
+            NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}
+            NAVER_REDIRECT_URI=${{ secrets.NAVER_REDIRECT_URI }}
+            REDIS_PORT=6379
+            REDIS_HOST=${{ secrets.REDIS_HOST }}
+            INTERNAL_KEY=${{ secrets.INTERNAL_KEY }}
+            EOF
+
+            # 최신 이미지 가져오고 서비스만 롤링
+            docker pull 1seyoung/unear-app:develop
+
+            # compose v2 기준 명령 (v1이면 docker-compose로 바꿔줘)
+            docker compose pull app || docker-compose pull app
+            docker compose up -d --no-deps app || docker-compose up -d --no-deps app
+
+            # 상태 확인
+            docker ps --filter "name=app"
