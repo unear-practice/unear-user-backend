@@ -33,9 +33,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         target: [dev1, dev2]  # 병렬 2개
-        max-parallel: 2
+        
     steps:
       - name: Deploy to EC2 via SSH (parallel)
         uses: appleboy/ssh-action@v1.0.0
