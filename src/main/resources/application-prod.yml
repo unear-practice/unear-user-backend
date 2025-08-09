@@ -116,3 +116,15 @@ logging:
 
 internal:
   key: ${INTERNAL_KEY}
+
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+server:
+  port: 8080
