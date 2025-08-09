@@ -79,7 +79,7 @@ jobs:
             INTERNAL_KEY=${{ secrets.INTERNAL_KEY }}
             EOF
 
-            docker compose pull app || docker-compose pull app
-            docker compose up -d --no-deps app || docker-compose up -d --no-deps app
+            docker-compose pull app || docker-compose pull app
+            docker-compose up -d --no-deps app || docker-compose up -d --no-deps app
 
             docker ps --filter "name=app"
