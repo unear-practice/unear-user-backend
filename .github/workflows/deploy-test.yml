@@ -26,7 +26,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: 1seyoung/unear-app:develop
+          tags: 1seyoung/unear-app:test
 
   deploy:
     needs: build_and_push
@@ -75,7 +75,7 @@ jobs:
             EOF
 
             # 최신 이미지 가져오고 서비스만 롤링
-            docker pull 1seyoung/unear-app:develop
+            docker pull 1seyoung/unear-app:test
 
             # compose v2 기준 명령 (v1이면 docker-compose로 바꿔줘)
             docker compose pull app || docker-compose pull app
