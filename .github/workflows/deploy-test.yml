@@ -1,4 +1,4 @@
-name: Deploy develop to EC2
+name: Deploy develop to EC2 - TEST
 
 on:
   push:
