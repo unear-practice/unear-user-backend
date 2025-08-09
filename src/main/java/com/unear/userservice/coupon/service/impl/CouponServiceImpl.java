@@ -174,7 +174,7 @@ public class CouponServiceImpl implements CouponService {
         }
 
         try {
-            userCouponRepository.save(userCoupon);
+//            userCouponRepository.save(userCoupon);
         } catch (DataIntegrityViolationException e) {
             throw new CouponAlreadyDownloadedException("이미 다운로드한 쿠폰입니다.");
         }
