@@ -78,8 +78,8 @@ jobs:
             docker pull 1seyoung/unear-app:test
 
             # compose v2 기준 명령 (v1이면 docker-compose로 바꿔줘)
-            docker compose pull app || docker-compose pull app
-            docker compose up -d --no-deps app || docker-compose up -d --no-deps app
+            docker-compose pull app || docker-compose pull app
+            docker-compose up -d --no-deps app || docker-compose up -d --no-deps app
 
             # 상태 확인
             docker ps --filter "name=app"
