@@ -45,6 +45,7 @@ public class CouponTemplate {
     private UnearEvent event;
 
     @Version
+    @Column(name = "version", nullable = false)
     private Long version;
 
     public void decreaseQuantity() {

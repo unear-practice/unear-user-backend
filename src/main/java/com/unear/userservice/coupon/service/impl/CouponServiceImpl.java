@@ -23,11 +23,15 @@ import com.unear.userservice.place.repository.PlaceRepository;
 import com.unear.userservice.user.entity.User;
 import com.unear.userservice.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -136,18 +140,22 @@ public class CouponServiceImpl implements CouponService {
         return UserCouponResponseDto.from(userCoupon);
     }
 
+
+    private final PlatformTransactionManager txManager;
+
     // 바깥 메서드: 트랜잭션 없이 재시도 루프
     public UserCouponResponseDto downloadFCFSCoupon(Long userId, Long couponTemplateId) {
         final int maxRetries = 3;
+        final TransactionTemplate tmpl = new TransactionTemplate(txManager);
+        tmpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                return issueOnceWithTx(userId, couponTemplateId); // 트랜잭션 안에서 1회 시도
+                return tmpl.execute(status -> issueOnceWithTx(userId, couponTemplateId)); // 매 시도마다 신규 트랜잭션
             } catch (ObjectOptimisticLockingFailureException | jakarta.persistence.OptimisticLockException e) {
-                // 동시 갱신 충돌 → 짧은 지터 백오프 후 재시도
+                // 낙관락 충돌 → 짧게 백오프 후 재시도
                 if (attempt == maxRetries) {
-                    // 재시도 한계 초과: 소진/경합 과다로 처리
-                    throw new CouponSoldOutException("요청이 몰려 쿠폰 발급에 실패했습니다.");
+                    throw new CouponSoldOutException("요청이 몰려 쿠폰 발급에 실패했습니다."); // 410 권장
                 }
                 try { Thread.sleep(20L * attempt); } catch (InterruptedException ignored) {}
             }
@@ -156,7 +164,6 @@ public class CouponServiceImpl implements CouponService {
     }
 
     // 내부 메서드: 실제 발급 로직 (매 호출마다 새로운 트랜잭션)
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected UserCouponResponseDto issueOnceWithTx(Long userId, Long couponTemplateId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("사용자를 찾을 수 없습니다."));
