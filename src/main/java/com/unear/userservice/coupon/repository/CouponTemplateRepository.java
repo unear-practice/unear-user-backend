@@ -4,11 +4,14 @@ import com.unear.userservice.common.enums.DiscountPolicy;
 import com.unear.userservice.coupon.entity.CouponTemplate;
 import com.unear.userservice.place.entity.Franchise;
 import com.unear.userservice.place.entity.Place;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface CouponTemplateRepository extends JpaRepository<CouponTemplate, Long> {
     List<CouponTemplate> findByDiscountPolicyDetailIdInAndMarkerCode(List<Long> discountPolicyIds, String markerCode);
@@ -51,5 +54,9 @@ WHERE (
     );
 
 
+    // 트랜잭션 안에서 행 잠금(PESSIMISTIC_WRITE)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from CouponTemplate c where c.couponTemplateId = :id")
+    Optional<CouponTemplate> findByIdForUpdate(@Param("id") Long id);
 
 }
