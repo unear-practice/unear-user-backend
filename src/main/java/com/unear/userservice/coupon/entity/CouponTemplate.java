@@ -44,6 +44,9 @@ public class CouponTemplate {
     @JoinColumn(name = "unear_event_id")
     private UnearEvent event;
 
+    @Version
+    private Long version;
+
     public void decreaseQuantity() {
         if (this.remainingQuantity <= 0) {
             throw new CouponSoldOutException("쿠폰 재고가 없습니다.");
