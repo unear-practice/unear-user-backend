@@ -7,9 +7,11 @@ import com.unear.userservice.place.entity.Place;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,9 +56,14 @@ WHERE (
     );
 
 
-    // 트랜잭션 안에서 행 잠금(PESSIMISTIC_WRITE)
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select c from CouponTemplate c where c.couponTemplateId = :id")
-    Optional<CouponTemplate> findByIdForUpdate(@Param("id") Long id);
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+        UPDATE CouponTemplate c
+           SET c.remainingQuantity = c.remainingQuantity - 1
+         WHERE c.couponTemplateId = :id
+           AND c.remainingQuantity > 0
+           AND :now BETWEEN c.couponStart AND c.couponEnd
+    """)
+    int decreaseIfAvailable(@Param("id") Long id, @Param("now") LocalDateTime now);
 
 }
