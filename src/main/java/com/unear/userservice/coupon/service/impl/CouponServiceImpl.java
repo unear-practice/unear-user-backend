@@ -140,7 +140,8 @@ public class CouponServiceImpl implements CouponService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("사용자를 찾을 수 없습니다."));
 
-        CouponTemplate template = couponTemplateRepository.findById(couponTemplateId)
+        // 쿠폰 템플릿을 비관적 락으로 조회 (SELECT ... FOR UPDATE) 비관적 락으로 템플릿 잠금
+        CouponTemplate template = couponTemplateRepository.findByIdForUpdate(couponTemplateId)
                 .orElseThrow(() -> new CouponTemplateNotFoundException("쿠폰 템플릿을 찾을 수 없습니다."));
 
         LocalDateTime now = LocalDateTime.now();
@@ -148,7 +149,12 @@ public class CouponServiceImpl implements CouponService {
             throw new CouponExpiredException("유효 기간이 지난 쿠폰입니다.");
         }
 
-        template.decreaseQuantity();
+        // 재고 검증 + 차감 (락 하에서 안전)
+        Integer remain = template.getRemainingQuantity();
+        if (remain == null || remain <= 0) {
+            throw new CouponSoldOutException("쿠폰이 소진되었습니다."); // 전역 핸들러에서 410 권장
+        }
+        template.decreaseQuantity(); // JPA 더티체킹으로 UPDATE
 
         UserCoupon userCoupon = UserCoupon.builder()
                 .user(user)
