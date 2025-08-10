@@ -24,7 +24,9 @@ import com.unear.userservice.user.entity.User;
 import com.unear.userservice.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -134,14 +136,33 @@ public class CouponServiceImpl implements CouponService {
         return UserCouponResponseDto.from(userCoupon);
     }
 
-    @Override
-    @Transactional
+    // 바깥 메서드: 트랜잭션 없이 재시도 루프
     public UserCouponResponseDto downloadFCFSCoupon(Long userId, Long couponTemplateId) {
+        final int maxRetries = 3;
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return issueOnceWithTx(userId, couponTemplateId); // 트랜잭션 안에서 1회 시도
+            } catch (ObjectOptimisticLockingFailureException | jakarta.persistence.OptimisticLockException e) {
+                // 동시 갱신 충돌 → 짧은 지터 백오프 후 재시도
+                if (attempt == maxRetries) {
+                    // 재시도 한계 초과: 소진/경합 과다로 처리
+                    throw new CouponSoldOutException("요청이 몰려 쿠폰 발급에 실패했습니다.");
+                }
+                try { Thread.sleep(20L * attempt); } catch (InterruptedException ignored) {}
+            }
+        }
+        throw new IllegalStateException("쿠폰 발급 처리에 실패했습니다.");
+    }
+
+    // 내부 메서드: 실제 발급 로직 (매 호출마다 새로운 트랜잭션)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected UserCouponResponseDto issueOnceWithTx(Long userId, Long couponTemplateId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("사용자를 찾을 수 없습니다."));
 
-        // 쿠폰 템플릿을 비관적 락으로 조회 (SELECT ... FOR UPDATE) 비관적 락으로 템플릿 잠금
-        CouponTemplate template = couponTemplateRepository.findByIdForUpdate(couponTemplateId)
+        // ★ 일반 조회 (낙관적 락은 커밋/flush 시점에 버전 비교로 충돌을 감지)
+        CouponTemplate template = couponTemplateRepository.findById(couponTemplateId)
                 .orElseThrow(() -> new CouponTemplateNotFoundException("쿠폰 템플릿을 찾을 수 없습니다."));
 
         LocalDateTime now = LocalDateTime.now();
@@ -149,12 +170,8 @@ public class CouponServiceImpl implements CouponService {
             throw new CouponExpiredException("유효 기간이 지난 쿠폰입니다.");
         }
 
-        // 재고 검증 + 차감 (락 하에서 안전)
-        Integer remain = template.getRemainingQuantity();
-        if (remain == null || remain <= 0) {
-            throw new CouponSoldOutException("쿠폰이 소진되었습니다."); // 전역 핸들러에서 410 권장
-        }
-        template.decreaseQuantity(); // JPA 더티체킹으로 UPDATE
+        // 재고 차감 (동시 갱신 시 커밋 시점에 OptimisticLockException 발생)
+        template.decreaseQuantity();
 
         UserCoupon userCoupon = UserCoupon.builder()
                 .user(user)
@@ -164,26 +181,13 @@ public class CouponServiceImpl implements CouponService {
                 .barcodeNumber(generateUniqueBarcode())
                 .build();
 
-        Map<String, Object> baseMetadata = LogMetadataUtils.buildUserBaseMetadata(user);
-
-        Map<String, Object> metadata = new LinkedHashMap<>(baseMetadata);
-
-//        if (template.getDiscountCode() != null) {
-//            metadata.put("benefit", template.getDiscountCode());
-//        }
-//        if (template.getMembershipCode() != null) {
-//            metadata.put("grade", template.getMembershipCode());
-//        }
-//
-//        if (metadata.size() > baseMetadata.size()) {
-//            userActionLogProducer.logUserAction(userId, UserActionType.DOWNLOAD_FCFS_COUPON, "eventPage", metadata);
-//        }
-
         try {
             userCouponRepository.save(userCoupon);
-        } catch (DataIntegrityViolationException e) {
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
             throw new CouponAlreadyDownloadedException("이미 다운로드한 쿠폰입니다.");
         }
+
+        // 트랜잭션 커밋 시점에 JPA가 version을 비교하며 충돌을 감지/예외 발생
         return UserCouponResponseDto.from(userCoupon);
     }
 
