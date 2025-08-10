@@ -141,63 +141,53 @@ public class CouponServiceImpl implements CouponService {
     }
 
 
-    private final PlatformTransactionManager txManager;
-
-    // 바깥 메서드: 트랜잭션 없이 재시도 루프
+    @Override
+    @Transactional
     public UserCouponResponseDto downloadFCFSCoupon(Long userId, Long couponTemplateId) {
-        final int maxRetries = 3;
-        final TransactionTemplate tmpl = new TransactionTemplate(txManager);
-        tmpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                return tmpl.execute(status -> issueOnceWithTx(userId, couponTemplateId)); // 매 시도마다 신규 트랜잭션
-            } catch (ObjectOptimisticLockingFailureException | jakarta.persistence.OptimisticLockException e) {
-                // 낙관락 충돌 → 짧게 백오프 후 재시도
-                if (attempt == maxRetries) {
-                    throw new CouponSoldOutException("요청이 몰려 쿠폰 발급에 실패했습니다."); // 410 권장
-                }
-                try { Thread.sleep(20L * attempt); } catch (InterruptedException ignored) {}
-            }
-        }
-        throw new IllegalStateException("쿠폰 발급 처리에 실패했습니다.");
-    }
-
-    // 내부 메서드: 실제 발급 로직 (매 호출마다 새로운 트랜잭션)
-    protected UserCouponResponseDto issueOnceWithTx(Long userId, Long couponTemplateId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("사용자를 찾을 수 없습니다."));
 
-        // ★ 일반 조회 (낙관적 락은 커밋/flush 시점에 버전 비교로 충돌을 감지)
-        CouponTemplate template = couponTemplateRepository.findById(couponTemplateId)
-                .orElseThrow(() -> new CouponTemplateNotFoundException("쿠폰 템플릿을 찾을 수 없습니다."));
-
         LocalDateTime now = LocalDateTime.now();
-        if (template.getCouponStart().isAfter(now) || template.getCouponEnd().isBefore(now)) {
-            throw new CouponExpiredException("유효 기간이 지난 쿠폰입니다.");
+
+        // 1) 재고 원자적 차감 (대기/잠금 없음)
+        int updated = couponTemplateRepository.decreaseIfAvailable(couponTemplateId, now);
+        if (updated == 0) {
+            // 재고 소진 or 기간 외
+            throw new CouponSoldOutException("재고 소진 또는 유효 기간이 아닙니다.");
         }
 
-        // 재고 차감 (동시 갱신 시 커밋 시점에 OptimisticLockException 발생)
-        template.decreaseQuantity();
-
+        // 2) 발급 (ID 프록시 사용, 추가 조회 없음)
         UserCoupon userCoupon = UserCoupon.builder()
                 .user(user)
-                .couponTemplate(template)
-                .createdAt(LocalDateTime.now())
+                .couponTemplate(couponTemplateRepository.getReferenceById(couponTemplateId))
+                .createdAt(now)
                 .couponStatusCode(CouponStatus.UNUSED.getCode())
                 .barcodeNumber(generateUniqueBarcode())
                 .build();
 
+
+        Map<String, Object> baseMetadata = LogMetadataUtils.buildUserBaseMetadata(user);
+
+        Map<String, Object> metadata = new LinkedHashMap<>(baseMetadata);
+
+//        if (template.getDiscountCode() != null) {
+//            metadata.put("benefit", template.getDiscountCode());
+//        }
+//        if (template.getMembershipCode() != null) {
+//            metadata.put("grade", template.getMembershipCode());
+//        }
+//
+//        if (metadata.size() > baseMetadata.size()) {
+//            userActionLogProducer.logUserAction(userId, UserActionType.DOWNLOAD_FCFS_COUPON, "eventPage", metadata);
+//        }
+
         try {
             userCouponRepository.save(userCoupon);
-        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+        } catch (DataIntegrityViolationException e) {
             throw new CouponAlreadyDownloadedException("이미 다운로드한 쿠폰입니다.");
         }
-
-        // 트랜잭션 커밋 시점에 JPA가 version을 비교하며 충돌을 감지/예외 발생
         return UserCouponResponseDto.from(userCoupon);
     }
-
 
     @Override
     @Transactional
